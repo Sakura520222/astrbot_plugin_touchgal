@@ -163,9 +163,18 @@ class TouchGalAPI:
             
             try:
                 async with aiohttp.ClientSession() as session:
+                    # 添加浏览器请求头，避免被服务端拒绝
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "Referer": "https://www.touchgal.top/",
+                        "Origin": "https://www.touchgal.top"
+                    }
                     async with session.get(
                         self.download_url, 
                         params=params,
+                        headers=headers,
                         timeout=aiohttp.ClientTimeout(total=10)
                     ) as response:
                         if response.status != 200:
@@ -204,7 +213,7 @@ class TouchGalAPI:
             # 生成唯一的文件名（使用URL的MD5避免重复下载）
             url_hash = hashlib.md5(url.encode()).hexdigest()
             filepath = str(self.temp_dir / f"main_{url_hash}")
-            output_path = str(self.temp_dir /  f"converted_{url_hash}.jpg")
+            output_path = str(self.temp_dir / f"converted_{url_hash}.jpg")
             
             # 如果已经转换过，直接返回
             if await async_exists(output_path):
@@ -212,7 +221,14 @@ class TouchGalAPI:
             
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
+                    # 添加图片下载的浏览器请求头
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "Referer": "https://www.touchgal.top/"
+                    }
+                    async with session.get(url, headers=headers) as response:
                         if response.status != 200:
                             logger.warning(f"获取图片失败: {response.status} - {url}")
                             return None
@@ -231,7 +247,6 @@ class TouchGalAPI:
                             if await async_exists(output_path):
                                 await aiofiles.os.remove(output_path)
                         return result
-                        
             except Exception as e:
                 logger.warning(f"图片处理失败: {str(e)} - {url}")
                 if await async_exists(output_path):
