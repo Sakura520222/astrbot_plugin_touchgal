@@ -91,13 +91,14 @@ class TouchGalAPI:
     
     async def _request(self, method: str, url: str, **kwargs) -> aiohttp.ClientResponse:
         """统一发起HTTP请求，自动添加浏览器请求头"""
-        # 基础请求头
+        # 基础请求头（模拟浏览器请求，绕过服务端来源校验）
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Referer": "https://www.touchgal.top/",
             "Origin": "https://www.touchgal.top",
+            "x-requested-with": "kun-fetch",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",

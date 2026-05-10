@@ -13,12 +13,12 @@
 - **命令格式**：以斜杠 / 开头，遵循 AstrBot 标准
 - **配置入口**：统一通过 AstrBot 控制面板管理
 - **展示名机制**：V1.4 支持插件展示名与目录名不同
-- **HTTP 请求（重要）**：第三方 API 存在反爬校验，需添加浏览器请求头（User-Agent、Referer、Origin 等）方可正常访问。当前已发现上游要求携带 `x-requested-with: kun-fetch` 自定义头。
+- **HTTP 请求（重要）**：第三方 API 存在反爬校验，需添加浏览器请求头（User-Agent、Referer、Origin 等）方可正常访问。已统一在 `_request()` 中注入 `x-requested-with: kun-fetch` 自定义头。
 
 ## 已知问题与注意事项
 - **反爬时效性**：硬编码的 User-Agent（如 Chrome 120）会过时，后续可能导致 403 错误，需定期更新或引入动态 UA。
-- **代码不一致**：`search_game` 已添加请求头，但 `get_downloads` 和 `download_and_convert_image` 方法尚未同步，存在潜在失效风险。
-- **缺少基础设施**：项目未封装统一 HTTP 请求方法（如 `_request()`），headers、超时、重试逻辑分散在各方法中，易产生技术债务。
+- **代码一致性**：所有 API 请求已通过统一 `_request()` 方法发出，浏览器请求头和 `x-requested-with` 自定义头集中管理。
+- **请求基础设施**：已封装统一 HTTP 请求方法 `_request()`，集中管理 headers、session 和日志。但仍缺少自动重试逻辑和降级机制。
 - **403 诊断清单**：遇到 403 时依次检查 User-Agent、Referer/Origin、自定义头（如 `x-requested-with`）、IP 封禁、Cookie/Token。
 - **稳定性建议**：TouchGal API 无官方接入保障，建议监控后续失效情况，并考虑增加重试策略与降级机制。
 
