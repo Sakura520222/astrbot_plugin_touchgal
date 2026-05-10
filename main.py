@@ -85,7 +85,15 @@ class TouchGalAPI:
     async def search_game(self, keyword: str, limit: int, nsfw: bool) -> List[Dict[str, Any]]:
         """搜索游戏信息"""
         async with self.semaphore:
-            headers = {"Content-Type": "application/json"}
+            # 模拟浏览器请求头，避免被服务端拒绝
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Referer": "https://www.touchgal.top/",
+                "Origin": "https://www.touchgal.top"
+            }
             
             # 正确构造queryString参数（字符串格式的JSON数组）
             query_string = json.dumps([{"type": "keyword", "name": keyword}])
