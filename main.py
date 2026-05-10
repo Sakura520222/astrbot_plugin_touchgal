@@ -81,25 +81,51 @@ class TouchGalAPI:
         self.download_url = f"{self.base_url}/patch/resource"
         self.temp_dir = StarTools.get_data_dir("astrbot_plugin_touchgal") / "tmp"
         self.semaphore = asyncio.Semaphore(10)  # 添加信号量限制并发API请求
+        self._session = None
+    
+    async def _get_session(self):
+        """获取或创建 ClientSession"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+    
+    async def _request(self, method: str, url: str, **kwargs) -> aiohttp.ClientResponse:
+        """统一发起HTTP请求，自动添加浏览器请求头"""
+        # 基础请求头
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": "https://www.touchgal.top/",
+            "Origin": "https://www.touchgal.top",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Priority": "u=1, i"
+        }
+        # 允许调用方覆盖或添加请求头
+        if "headers" in kwargs:
+            headers.update(kwargs["headers"])
+            kwargs["headers"] = headers
+        else:
+            kwargs["headers"] = headers
         
+        session = await self._get_session()
+        return await session.request(method, url, **kwargs)
+    
+    async def close_session(self):
+        """关闭 ClientSession"""
+        if self._session and not self._session.closed:
+            await self._session.close()
+    
     async def search_game(self, keyword: str, limit: int, nsfw: bool) -> List[Dict[str, Any]]:
         """搜索游戏信息"""
         async with self.semaphore:
-            # 模拟浏览器请求头，避免被服务端拒绝
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "Referer": "https://www.touchgal.top/",
-                "Origin": "https://www.touchgal.top"
-            }
-            
             # 正确构造queryString参数（字符串格式的JSON数组）
             query_string = json.dumps([{"type": "keyword", "name": keyword}])
             
             payload = {
-                "queryString": query_string,  # 使用字符串格式的JSON
+                "queryString": query_string,
                 "limit": limit,
                 "searchOption": {
                     "searchInIntroduction": True,
@@ -112,8 +138,8 @@ class TouchGalAPI:
                 "selectedPlatform": "all",
                 "sortField": "resource_update_time",
                 "sortOrder": "desc",
-                "selectedYears": ["all"],  # 添加缺失的必需字段
-                "selectedMonths": ["all"]  # 添加缺失的必需字段
+                "selectedYears": ["all"],
+                "selectedMonths": ["all"]
             }
             cookies = {
                 "kun-patch-setting-store|state|data|kunNsfwEnable": "sfw"
@@ -123,36 +149,28 @@ class TouchGalAPI:
                     "kun-patch-setting-store|state|data|kunNsfwEnable": "all"
                 }
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self.search_url, 
-                        json=payload, 
-                        headers=headers,
-                        cookies=cookies,
-                        timeout=aiohttp.ClientTimeout(total=15)
-                    ) as response:
-                        # 确保响应状态为200
-                        if response.status != 200:
-                            error_text = await response.text()
-                            raise APIError(f"API请求失败: {response.status} - {error_text}")
-                        
-                        # 尝试解析JSON
-                        try:
-                            data = await response.json()
-                        except Exception as e:
-                            text_response = await response.text()
-                            logger.error(f"JSON解析失败: {str(e)} - 响应内容: {text_response[:200]}")
-                            raise APIError("API返回了无效的JSON数据")
-                        
-                        # 验证数据结构
-                        if not isinstance(data, dict) or "galgames" not in data:
-                            logger.warning(f"API返回了意外的数据结构: {data}")
-                            raise APIError("API返回了无效的数据结构")
-                        
-                        if not data.get("galgames"):
-                            raise NoGameFound(f"未找到游戏: {keyword}")
-                        
-                        return data["galgames"]
+                headers = {"Content-Type": "application/json"}
+                response = await self._request("POST", self.search_url, json=payload, headers=headers, cookies=cookies, timeout=aiohttp.ClientTimeout(total=15))
+                async with response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise APIError(f"API请求失败: {response.status} - {error_text}")
+                    
+                    try:
+                        data = await response.json()
+                    except Exception as e:
+                        text_response = await response.text()
+                        logger.error(f"JSON解析失败: {str(e)} - 响应内容: {text_response[:200]}")
+                        raise APIError("API返回了无效的JSON数据")
+                    
+                    if not isinstance(data, dict) or "galgames" not in data:
+                        logger.warning(f"API返回了意外的数据结构: {data}")
+                        raise APIError("API返回了无效的数据结构")
+                    
+                    if not data.get("galgames"):
+                        raise NoGameFound(f"未找到游戏: {keyword}")
+                    
+                    return data["galgames"]
             except aiohttp.ClientError as e:
                 raise APIError(f"网络请求错误: {str(e)}")
 
@@ -162,42 +180,29 @@ class TouchGalAPI:
             params = {"patchId": patch_id}
             
             try:
-                async with aiohttp.ClientSession() as session:
-                    # 添加浏览器请求头，避免被服务端拒绝
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "Accept": "application/json, text/plain, */*",
-                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                        "Referer": "https://www.touchgal.top/",
-                        "Origin": "https://www.touchgal.top"
-                    }
-                    async with session.get(
-                        self.download_url, 
-                        params=params,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=10)
-                    ) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
-                            raise APIError(f"API请求失败: {response.status} - {error_text}")
-                        
-                        # 尝试解析JSON
-                        try:
-                            data = await response.json()
-                        except Exception as e:
-                            text_response = await response.text()
-                            logger.error(f"JSON解析失败: {str(e)} - 响应内容: {text_response[:200]}")
-                            raise APIError("API返回了无效的JSON数据")
-                        
-                        # 验证数据结构
-                        if not isinstance(data, list):
-                            logger.warning(f"API返回了意外的数据结构: {data}")
-                            raise APIError("API返回了无效的数据结构")
-                        
-                        if not data:
-                            raise DownloadNotFound(f"未找到ID为{patch_id}的下载资源")
-                        
-                        return data
+                response = await self._request("GET", self.download_url, params=params, timeout=aiohttp.ClientTimeout(total=10))
+                async with response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise APIError(f"API请求失败: {response.status} - {error_text}")
+                    
+                    # 尝试解析JSON
+                    try:
+                        data = await response.json()
+                    except Exception as e:
+                        text_response = await response.text()
+                        logger.error(f"JSON解析失败: {str(e)} - 响应内容: {text_response[:200]}")
+                        raise APIError("API返回了无效的JSON数据")
+                    
+                    # 验证数据结构
+                    if not isinstance(data, list):
+                        logger.warning(f"API返回了意外的数据结构: {data}")
+                        raise APIError("API返回了无效的数据结构")
+                    
+                    if not data:
+                        raise DownloadNotFound(f"未找到ID为{patch_id}的下载资源")
+                    
+                    return data
             except aiohttp.ClientError as e:
                 raise APIError(f"网络请求错误: {str(e)}")
     
@@ -220,33 +225,28 @@ class TouchGalAPI:
                 return output_path
             
             try:
-                async with aiohttp.ClientSession() as session:
-                    # 添加图片下载的浏览器请求头
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                        "Referer": "https://www.touchgal.top/"
-                    }
-                    async with session.get(url, headers=headers) as response:
-                        if response.status != 200:
-                            logger.warning(f"获取图片失败: {response.status} - {url}")
-                            return None
-                        
-                        # 检查图片类型
-                        content_type = response.headers.get('Content-Type', '').split(';')[0].strip().lower()
-                        
-                        # 写入原始图片
-                        async with aiofiles.open(filepath, "wb") as f:
-                            await f.write(await response.read())
-                        
-                        # 处理图片转换
-                        result = await self._convert_image(filepath, output_path)
-                        if result is None:
-                            # 转换失败，清理可能已创建的文件
-                            if await async_exists(output_path):
-                                await aiofiles.os.remove(output_path)
-                        return result
+                headers = {
+                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                    "Sec-Fetch-Dest": "image",
+                    "Sec-Fetch-Mode": "cors"
+                }
+                response = await self._request("GET", url, headers=headers)
+                async with response:
+                    if response.status != 200:
+                        logger.warning(f"获取图片失败: {response.status} - {url}")
+                        return None
+                    
+                    # 写入原始图片
+                    async with aiofiles.open(filepath, "wb") as f:
+                        await f.write(await response.read())
+                    
+                    # 处理图片转换
+                    result = await self._convert_image(filepath, output_path)
+                    if result is None:
+                        # 转换失败，清理可能已创建的文件
+                        if await async_exists(output_path):
+                            await aiofiles.os.remove(output_path)
+                    return result
             except Exception as e:
                 logger.warning(f"图片处理失败: {str(e)} - {url}")
                 if await async_exists(output_path):
@@ -260,7 +260,7 @@ class TouchGalAPI:
                     except Exception as e:
                         logger.warning(f"删除原始图片失败: {str(e)}")
     
-    async def _convert_image(self, input_path: str, output_path: str) -> str:
+    async def _convert_image(self, input_path: str, output_path: str) -> Optional[str]:
         """转换图片为JPG格式"""
         try:
             # 在异步环境中处理图片转换
@@ -774,6 +774,8 @@ class TouchGalPlugin(Star):
     async def terminate(self):
         """插件终止时清理资源"""
         await self.scheduler.cancel_all()
+        # 关闭 API 的 ClientSession
+        await self.api.close_session()
         # 取消定期缓存清理任务
         if hasattr(self, 'periodic_task') and not self.periodic_task.done():
             self.periodic_task.cancel()
